@@ -33,6 +33,9 @@ if not os.path.exists('./upload_data'):
 if not os.path.exists('./download_data'):
     os.makedirs('./download_data')
 
+# Настройка MLflow
+mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5432"))
+
 # Загрузка классов доступных моделей
 models_dir = './ml_models'
 model_files = find_model_files(models_dir)
@@ -46,16 +49,16 @@ for file in model_files:
 
 # Настройка Minio
 minio_client = Minio(
-    "minio:9000",
-    access_key="minioadmin",
-    secret_key="minioadmin",
+    os.getenv("MINIO_ENDPOINT", "minio:9000"),
+    access_key=os.getenv("MINIO_ACCESS_KEY", "minioadmin"),
+    secret_key=os.getenv("MINIO_SECRET_KEY", "minioadmin"),
     secure=False
 )
 
 # Создание бакета в Minio
-if not minio_client.bucket_exists("mlopsbucket"):
-    minio_client.make_bucket("mlopsbucket")
-logger.info(f"Bucket 'mlopsbucket' created successfully.")
+if not minio_client.bucket_exists(os.getenv("MINIO_BUCKET_NAME", "mlopsbucket")):
+    minio_client.make_bucket(os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"))
+logger.info(f"Bucket {os.getenv('MINIO_BUCKET_NAME', 'mlopsbucket')} created successfully.")
 
 @app.get("/models", response_model=List[str])
 def get_available_models():
@@ -73,7 +76,7 @@ def get_available_datasets():
     """
     Возвращает список доступных для обучения датасетов.
     """
-    objects = minio_client.list_objects("mlopsbucket", recursive=False)
+    objects = minio_client.list_objects(os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), recursive=False)
     return list(objects)
 
 @app.get("/status", response_model=Dict[str, str])
@@ -100,7 +103,7 @@ async def upload_dataset(file: UploadFile = File(...)):
     with open(file_path, "wb") as buffer:
         buffer.write(await file.read())
 
-    upload_dataset_to_minio(minio_client, "mlopsbucket", file.filename, file_path)
+    upload_dataset_to_minio(minio_client, os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), file.filename, file_path)
 
     return {"filename": file.filename, "message": "Dataset uploaded"}
 
@@ -113,7 +116,7 @@ async def download_dataset(filename: str):
     file_path = os.path.join('./download_data', filename)
 
     # Скачивание файла из Minio
-    download_dataset_from_minio(minio_client, "mlopsbucket", filename, file_path)
+    download_dataset_from_minio(minio_client, os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), filename, file_path)
     logger.info(f'Dataset downloaded from Minio: {filename} to {file_path}')
 
     # Читаем файл в байтах
@@ -145,7 +148,7 @@ def train_model(request: TrainRequest):
 
                 if request.dataset_path is not None:
                     file_path = os.path.join('./download_data', request.dataset_path)
-                    download_dataset_from_minio(minio_client, "mlopsbucket", filename, file_path)
+                    download_dataset_from_minio(minio_client, os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), filename, file_path)
 
                     df = pd.read_csv(file_path)
                     X = df.drop(columns='target')
@@ -164,7 +167,7 @@ def train_model(request: TrainRequest):
                     filename = model.model_id + '.csv'
                     file_path = os.path.join('./upload_data', filename)
                     df.to_csv(file_path, index=False)
-                    upload_dataset_to_minio(minio_client, "mlopsbucket", filename, file_path)
+                    upload_dataset_to_minio(minio_client, os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), filename, file_path)
 
                 model.train(X, y, 
                     cv=request.cv,
@@ -238,7 +241,7 @@ def retrain_model(request: RetrainRequest):
                 
                 if request.dataset_path is not None:
                     file_path = os.path.join('./download_data', request.dataset_path)
-                    download_dataset_from_minio(minio_client, "mlopsbucket", filename, file_path)
+                    download_dataset_from_minio(minio_client, os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), filename, file_path)
 
                     df = pd.read_csv(file_path)
                     X = df.drop(columns='target')
@@ -257,7 +260,7 @@ def retrain_model(request: RetrainRequest):
                     filename = model.model_id + '.csv'
                     file_path = os.path.join('./upload_data', filename)
                     df.to_csv(file_path, index=False)
-                    upload_dataset_to_minio(minio_client, "mlopsbucket", filename, file_path)
+                    upload_dataset_to_minio(minio_client, os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), filename, file_path)
 
                 model.retrain(X, y, 
                     cv=request.cv, 

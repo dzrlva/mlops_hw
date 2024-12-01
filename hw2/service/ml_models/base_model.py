@@ -15,24 +15,31 @@ from sklearn.metrics import (
 from sklearn.model_selection import cross_val_score, GridSearchCV
 from sklearn.preprocessing import LabelEncoder
 
+import mlflow
+from mlflow.models import Model
+from mlflow.sklearn import save_model, load_model
+
 from ml_models.task_metrics import reg_model_metric_performance, binary_model_metric_performance, multiclass_model_metric_performance
 
 # Настройка логгирования
 logging.basicConfig(filename='./ml_service_logs', filemode='a', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('./ml_service_logs')
 
+# Настройка MLflow
+mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
 
 class BaseModel(ABC):
     """
     Базовый класс для модели машинного обучения.
     """
-    def __init__(self, model_id=None, model_description=None, model_params=None, task_type='regression'):
+    def __init__(self, model_id=None, model_description=None, model_params=None, task_type='regression',mlflow_experiment_name='mlflow_model'):
         """
         Инициализация модели.
         :param model_id: Уникальный идентификатор модели.
         :param model_description: Описание модели
         :param model_params: Параметры модели.
         :param task_type: Тип задачи (regression, binary_classification, multiclass_classification).
+        :param mlflow_experiment_name: Название эксперимента в mlflow
         """
         self.model_id = model_id if model_id else str(uuid4())
         self.model_params = model_params if model_params else {}
@@ -43,6 +50,7 @@ class BaseModel(ABC):
         self.task_type = task_type
         self.model_description = model_description
         self.le_path = os.path.join('label_encoders', f'{self.model_id}_le.joblib') # LabelEncoder при необходимости
+        self.mlflow_experiment_name = mlflow_experiment_name
         # Создаем директорию для моделей, если она не существует
         if not os.path.exists('models'):
             os.makedirs('models')
@@ -50,7 +58,7 @@ class BaseModel(ABC):
             os.makedirs('label_encoders')
         # Создаем журнал моделей, если он не существует
         if not os.path.exists(self.log_path):
-            log_df = pd.DataFrame(columns=['model_id', 'model_type', 'model_description', 'model_params',
+            log_df = pd.DataFrame(columns=['model_id', 'model_type', 'model_description', 'model_params', 'mlflow_experiment_name',
                 'status', 'status_time', 'model_path', 'task_type', 'cv_metrics'])
             log_df.to_csv(self.log_path, index=False)
         if model_id is None:
@@ -68,6 +76,10 @@ class BaseModel(ABC):
                 self.model_params = eval(model_id_logs.iloc[-1, 3])
             if self.model_description is None:
                 self.model_description = model_id_logs.iloc[-1, 2]
+            if self.mlflow_experiment_name is None:
+                self.mlflow_experiment_name = model_id_logs.iloc[-1, 4]
+
+        self.start_mlflow_experiment()
 
     def _update_log(self, cv_metrics=None):
         """
@@ -190,13 +202,14 @@ class BaseModel(ABC):
             logger.error(f'Unknown task type {self.task_type}')
             raise Exception('Unknown task type')
 
-        # Сохранение модели
+        # Сохранение модели + mlflow
         self.status = 'trained' if self.status != 'refitting' else 'retrained'
         self.save()
         
         eval_metric = self.evaluate(X, y)
         cv_metrics.update(eval_metric)
 
+        self.save_model_to_mlflow(cv_metrics)
         self._update_log(cv_metrics)
 
         logger.info(f'Model {self.model_id} trained with params {self.model_params} and cv_metrics {cv_metrics}')
@@ -318,3 +331,65 @@ class BaseModel(ABC):
             
         logger.info(f'Model {self.model_id} evaluated with metrics {metrics}')
         return metrics
+
+    def start_mlflow_experiment(self):
+        """
+        Инициализация эксперимента в MLflow.
+        """
+        try:
+            mlflow.set_experiment(self.mlflow_experiment_name)
+            logger.info(f'MLflow experiment started: {self.mlflow_experiment_name}')
+        except Exception as e:
+            logger.error(f'Error starting MLflow experiment: {e}')
+            raise
+
+    def log_mlflow_parameters(self):
+        """
+        Логирование параметров модели в MLflow.
+        """
+        try:
+            mlflow.log_params(self.model_params)
+            logger.info(f'MLflow parameters logged: {self.model_params}')
+        except Exception as e:
+            logger.error(f'Error logging MLflow parameters: {e}')
+            raise
+
+    def log_mlflow_metrics(self, metrics):
+        """
+        Логирование метрик модели в MLflow.
+        :param metrics: Словарь с метриками.
+        """
+        try:
+            mlflow.log_metrics(metrics)
+            logger.info(f'MLflow metrics logged: {metrics}')
+        except Exception as e:
+            logger.error(f'Error logging MLflow metrics: {e}')
+            raise
+
+    def save_model_to_mlflow(self, metrics=None):
+        """
+        Сохранение модели в MLflow.
+        :param metrics: Метрики модели
+        """
+        try:
+            with mlflow.start_run(run_name=self.model_id):
+                mlflow.log_params(self.model_params)
+                mlflow.sklearn.log_model(self.model, "model")
+                if isinstance(metrics, dict):
+                    mlflow.log_metrics(metrics)
+                logger.info(f'Model saved to MLflow')
+        except Exception as e:
+            logger.error(f'Error saving model to MLflow: {e}')
+            raise
+
+    def load_model_from_mlflow(self, run_id):
+        """
+        Загрузка модели из MLflow.
+        :param run_id: ID эксперимента в MLflow.
+        """
+        try:
+            self.model = mlflow.sklearn.load_model(f"runs:/{run_id}/model")
+            logger.info(f'Model loaded from MLflow: run_id={run_id}')
+        except Exception as e:
+            logger.error(f'Error loading model from MLflow: {e}')
+            raise
