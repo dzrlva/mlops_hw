@@ -23,10 +23,11 @@ class BaseModel(ABC):
     """
     Базовый класс для модели машинного обучения.
     """
-    def __init__(self, model_id=None, model_params=None, task_type='regression'):
+    def __init__(self, model_id=None, model_description=None, model_params=None, task_type='regression'):
         """
         Инициализация модели.
         :param model_id: Уникальный идентификатор модели.
+        :param model_description: Описание модели
         :param model_params: Параметры модели.
         :param task_type: Тип задачи (regression, binary_classification, multiclass_classification).
         """
@@ -37,24 +38,41 @@ class BaseModel(ABC):
         self.model_path = os.path.join('../models', f'{self.model_id}.joblib')
         self.log_path = 'models_log.csv'
         self.task_type = task_type
+        self.model_description = model_description
+        self.le_path = os.path.join('../models', f'{self.model_id}_le.joblib') # LabelEncoder при необходимости
         # Создаем директорию для моделей, если она не существует
         if not os.path.exists('../models'):
             os.makedirs('../models')
         # Создаем журнал моделей, если он не существует
         if not os.path.exists(self.log_path):
-            log_df = pd.DataFrame(columns=['model_id', 'model_params', 'status', 'status_time', 'model_path', 'task_type', 'cv_metrics'])
+            log_df = pd.DataFrame(columns=['model_id', 'model_description', 'model_params', 
+                'status', 'status_time', 'model_path', 'task_type', 'cv_metrics'])
             log_df.to_csv(self.log_path, index=False)
-        # Записываем информацию о модели в журнал
-        self._update_log()
-        logging.info(f'Model {self.model_id} initialized with params {self.model_params} for task {self.task_type}')
+        if model_id is None:
+            # Записываем информацию о модели в журнал
+            self._update_log()
+            logging.info(f'Model {self.model_id} initialized with params {self.model_params} for task {self.task_type}')
+        else:
+            # Загружаем логи по данной модели
+            model_id_logs = pd.read_csv(self.log_path, parse_dates=['status_time'])
+            model_id_logs = model_id_logs.loc[model_id_logs.model_id == self.model_id].sort_values('status_time')
+            # Восстановим из логов не заполненные параметры, такие как task_type, которые понадобятся            
+            if self.task_type is None:
+                self.task_type = model_id_logs.iloc[-1, 6]
+            if self.model_params is None:
+                self.model_params = eval(model_id_logs.iloc[-1, 2])
+            if self.model_description is None:
+                self.model_description = model_id_logs.iloc[-1, 1]
 
     def _update_log(self, cv_metrics=None):
         """
         Обновление журнала моделей.
         :param cv_metrics: Метрики кросс-валидации.
         """
+        # создаем новую запись
         new_log = pd.DataFrame({
             'model_id': [self.model_id],
+            'model_description': [self.model_description],
             'model_params': [str(self.model_params)],
             'status': [self.status],
             'status_time': [datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
@@ -94,6 +112,42 @@ class BaseModel(ABC):
         """
         pass
 
+    def prepare_taget(self, y):
+        """
+        Предобработка признаков.
+        :param y: Целевые значения.
+        :return: Подготовленные целевые значения.
+        """
+        if self.task_type == 'regression':
+            if all(isinstance(x, (int, float)) for x in y):
+                return np.array(y, dtype=float)
+            else:
+                raise Exception("Все значения целевой переменной должны быть числами для задачи регрессии.")
+        elif 'classification' in self.task_type:
+            if not all(isinstance(x, (int, float)) for x in y):
+                # Есть строковые данные, нужен LabelEncoder
+                target = np.array(y, dtype=str)
+                
+                if not os.path.exists(self.le_path):
+                    label_encoder = LabelEncoder()
+                    label_encoder.fit(target)
+                    # Сохранение пайплайна
+                    joblib.dump(label_encoder, self.le_path)
+                    logging.info(f'LabelEncoder {self.model_id} saved to {self.le_path}')
+                else:
+                    label_encoder = joblib.load(self.le_path)
+                    logging.info(f'LabelEncoder {self.model_id} loaded from {self.le_path}')
+
+                target_encoded = label_encoder.transform(target)
+                return target_encoded
+            else:
+                # Если все значения числовые, преобразуем их к целым числам
+                target = np.array(target, dtype=int)
+                return target
+        else:
+            logging.error(f'Unknown task type {self.task_type}')
+            raise Exception('Unknown task type')
+
     def train(self, X, y, cv=5, optimize_hyperparameters_flag=False, optimize_hyperparameters_params=None):
         """
         Обучение модели с оценкой метрик на кросс-валидации и подбором гиперпараметров.
@@ -104,40 +158,43 @@ class BaseModel(ABC):
         :param optimize_hyperparameters_params: Параметры для подбора гиперпараметров под GridSearchCV.
         """
         X_prepared = self.prepare_features(X)
+        y_prepared = self.prepare_taget(y)
         # Подбор гиперпараметров, если флаг установлен
         if optimize_hyperparameters_flag:
-            self.model_params = self.optimize_hyperparameters(X_prepared, y, optimize_hyperparameters_params)
+            self.model_params = self.optimize_hyperparameters(X_prepared, y_prepared, optimize_hyperparameters_params)
             logging.info(f'Model {self.model_id} optimized with params {self.model_params}')
-        self.fit(X_prepared, y)
+        self.status = 'fitting' if self.status != 'retrained' else 'refitting'
+        self._update_log()
+        self.fit(X_prepared, y_prepared)
         # Оценка метрик на кросс-валидации
         if self.task_type == 'regression':
-            cv_scores = cross_val_score(self.model, X_prepared, y, cv=cv, scoring='neg_mean_squared_error')
+            cv_scores = cross_val_score(self.model, X_prepared, y_prepared, cv=cv, scoring='neg_mean_squared_error')
             cv_metrics = {'cv_rmse': np.mean(np.sqrt(-cv_scores))}
         elif self.task_type == 'binary_classification':
-            cv_scores = cross_val_score(self.model, X_prepared, y, cv=cv, scoring='roc_auc')
+            cv_scores = cross_val_score(self.model, X_prepared, y_prepared, cv=cv, scoring='roc_auc')
             cv_metrics = {'cv_roc_auc': np.mean(cv_scores)}
         elif self.task_type == 'multiclass_classification':
-            cv_scores = cross_val_score(self.model, X_prepared, y, cv=cv, scoring='accuracy')
+            cv_scores = cross_val_score(self.model, X_prepared, y_prepared, cv=cv, scoring='accuracy')
             cv_metrics = {'cv_accuracy': np.mean(cv_scores)}
         else:
             logging.error(f'Unknown task type {self.task_type}')
             raise Exception('Unknown task type')
-        self.status = 'trained'
+        self.status = 'trained' if self.status != 'retrained' else 'retrained'
         self.save()
         self._update_log(cv_metrics)
         logging.info(f'Model {self.model_id} trained with params {self.model_params} and cv_metrics {cv_metrics}')
 
-    def retrain(self, X, y, optimize_hyperparameters_flag=False, optimize_hyperparameters_params=None):
+    def retrain(self, X, y, cv=5, optimize_hyperparameters_flag=False, optimize_hyperparameters_params=None):
         """
         Переобучение модели.
         :param X: Матрица признаков.
         :param y: Вектор целевых значений.
+        :param cv: Количество фолдов для кросс-валидации.
         :param optimize_hyperparameters_flag: Флаг для автоматического подбора гиперпараметров.
         :param optimize_hyperparameters_params: Параметры для подбора гиперпараметров под GridSearchCV.
         """
-        self.train(X, y, optimize_hyperparameters_flag, optimize_hyperparameters_params)
         self.status = 'retrained'
-        self.save()
+        self.train(X, y, optimize_hyperparameters_flag, optimize_hyperparameters_params)
         logging.info(f'Model {self.model_id} retrained')
 
     def predict(self, X):
@@ -192,7 +249,6 @@ class BaseModel(ABC):
             raise Exception('Model not found')
         self.model = joblib.load(self.model_path)
         self.status = 'loaded'
-        self._update_log()
         logging.info(f'Model {self.model_id} loaded from {self.model_path}')
 
     def delete(self):
