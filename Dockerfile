@@ -12,6 +12,9 @@ COPY service/pyproject.toml ./
 # Устанавливаем Poetry
 RUN pip install poetry
 
+# Установка Git
+RUN apt-get update && apt-get install -y git
+
 # Устанавливаем зависимости
 RUN poetry config virtualenvs.create false && poetry install --no-interaction --no-ansi
 

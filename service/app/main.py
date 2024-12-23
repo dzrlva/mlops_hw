@@ -1,11 +1,10 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Response
 from pydantic import BaseModel
 from typing import List, Dict, Any
 import os
 import joblib
 import pandas as pd
 from datetime import datetime
-
 from minio import Minio
 import mlflow
 from mlflow.models import Model
@@ -72,6 +71,14 @@ def get_available_models():
     
     return available_model_names
 
+@app.get("/datasets_info")
+def get_available_datasets():
+    """
+    Возвращает список доступных для обучения датасетов.
+    """
+    objects = minio_client.list_objects(os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), recursive=False)
+    return list(objects)
+
 @app.get("/status", response_model=Dict[str, str])
 def get_status():
     """
@@ -86,7 +93,7 @@ def get_models_info():
     """
     return pd.read_csv('./models_log.csv').groupby('model_id').tail(1).to_dict(orient='records')
 
-@app.post("/upload-dataset/")
+@app.post("/upload_dataset/")
 async def upload_dataset(file: UploadFile = File(...)):
     """
     Загружает датасет в minio и отслеживает его с помощью DVC.
@@ -100,7 +107,7 @@ async def upload_dataset(file: UploadFile = File(...)):
 
     return {"filename": file.filename, "message": "Dataset uploaded and tracked successfully"}
 
-@app.get("/download-dataset/{filename}")
+@app.get("/download_dataset/{filename}")
 async def download_dataset(filename: str):
     """
     Выгружеает датасет из minio
@@ -110,10 +117,17 @@ async def download_dataset(filename: str):
 
     # Скачивание файла из Minio
     download_dataset_from_minio(minio_client, os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), filename, file_path)
-
     logger.info(f'Dataset downloaded from Minio: {filename} to {file_path}')
 
-    return {"filename": filename, "message": "Dataset downloaded successfully"}
+    # Читаем файл в байтах
+    with open(file_path, "rb") as file:
+        file_content = file.read()
+
+    # Удаление файла из буферной папки после использования
+    os.remove(file_path)
+    logger.info(f'Buffer file {file_path} deleted')
+
+    return Response(content=file_content, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename={filename}"})
     
 @app.post("/train", response_model=Dict[str, Any])
 def train_model(request: TrainRequest):

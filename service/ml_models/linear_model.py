@@ -29,8 +29,8 @@ class LinearModel(BaseModel):
     """
     Класс для линейных моделей машинного обучения.
     """
-    def __init__(self, model_id=None, model_description=None, model_params=None, task_type='regression'):
-        super().__init__(model_id, model_description, model_params, task_type)
+    def __init__(self, model_id=None, model_description=None, model_params=None, task_type='regression', mlflow_experiment_name=None):
+        super().__init__(model_id, model_description, model_params, task_type, mlflow_experiment_name)
         self.pipeline_path = os.path.join('pipelines', f'{self.model_id}_pipeline.joblib')
         # Создаем директорию для пайплайнов, если она не существует
         if not os.path.exists('pipelines'):
