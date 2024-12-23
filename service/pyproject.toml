@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "mlops_hw"
+name = "service"
 version = "0.1.0"
 description = "REST сервис для обучения и использования различных типов машинных моделей"
 authors = ["Александр Кормишенков <alex.kormishenkov@gmail.com>"]

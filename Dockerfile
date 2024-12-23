@@ -1,0 +1,28 @@
+# Dockerfile для FastAPI приложения
+
+# Используем официальный образ Python
+FROM python:3.12-slim
+
+# Устанавливаем рабочую директорию
+WORKDIR /service
+
+# Копируем файлы зависимостей
+COPY pyproject.toml ./
+
+# Устанавливаем Poetry
+RUN pip install poetry
+
+# Устанавливаем зависимости
+RUN poetry config virtualenvs.create false && poetry install --no-interaction --no-ansi
+
+# Копируем остальные файлы приложения
+COPY . .
+
+# Устанавливаем переменные окружения
+ENV PYTHONPATH=/service
+
+# Экспонируем порт
+EXPOSE 8000
+
+# Запуск приложения
+CMD ["uvicorn", "service.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
