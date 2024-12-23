@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import requests
 from app.pydantic_models import TrainRequest, RetrainRequest, EvaluateRequest, PredictRequest
@@ -112,7 +113,7 @@ elif menu == "Обучение новой модели":
     if st.button("Обучить модель"):
         request = TrainRequest(
             model_type=model_type,
-            mlflow_experiment_name=mlflow_experiment_name, if mlflow_experiment_name else 'mlflow_model',
+            mlflow_experiment_name=mlflow_experiment_name if mlflow_experiment_name else 'mlflow_model',
             model_description=model_description,
             model_params=eval(model_params) if model_params else {},
             task_type=task_type,
@@ -144,7 +145,7 @@ elif menu == "Переобучение модели":
     if st.button("Переобучить модель"):
         request = RetrainRequest(
             model_id=model_id,
-            mlflow_experiment_name=mlflow_experiment_name, if mlflow_experiment_name else 'mlflow_model',
+            mlflow_experiment_name=mlflow_experiment_name if mlflow_experiment_name else 'mlflow_model',
             model_description=model_description,
             model_params=eval(model_params) if model_params else {},
             dataset_path=dataset_path if dataset_path else None,

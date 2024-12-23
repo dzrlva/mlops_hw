@@ -7,7 +7,7 @@ FROM python:3.12-slim
 WORKDIR /service
 
 # Копируем файлы зависимостей
-COPY pyproject.toml ./
+COPY service/pyproject.toml ./
 
 # Устанавливаем Poetry
 RUN pip install poetry
@@ -16,7 +16,7 @@ RUN pip install poetry
 RUN poetry config virtualenvs.create false && poetry install --no-interaction --no-ansi
 
 # Копируем остальные файлы приложения
-COPY . .
+COPY service/ .
 
 # Устанавливаем переменные окружения
 ENV PYTHONPATH=/service
@@ -25,4 +25,4 @@ ENV PYTHONPATH=/service
 EXPOSE 8501
 
 # Запуск приложения
-CMD ["streamlit", "run", "service/app/streamlit.py", "--server.port", "8501", "--server.enableCORS", "false"]
+CMD ["streamlit", "run", "app/streamlit.py", "--server.port", "8501", "--server.enableCORS", "false"]

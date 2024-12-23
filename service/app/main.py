@@ -11,6 +11,7 @@ import dvc.api
 import mlflow
 from mlflow.models import Model
 from mlflow.sklearn import save_model, load_model
+import boto3
 from botocore.exceptions import NoCredentialsError, ClientError
 
 from ml_models.catboost_model import CatBoostModel
@@ -27,16 +28,9 @@ app = FastAPI(title="ML Model Service")
 logging.basicConfig(filename='./ml_service_logs', filemode='a', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('./ml_service_logs')
 
-# Настройка Minio
-minio_client = Minio(
-    os.getenv("MINIO_ENDPOINT", "play.min.io"),
-    access_key=os.getenv("MINIO_ACCESS_KEY", "minioadmin"),
-    secret_key=os.getenv("MINIO_SECRET_KEY", "minioadmin"),
-    secure=False  # Установите True, если используете HTTPS
-)
 
 # Настройка MLflow
-mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
+mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5432"))
 
 # Загрузка классов доступных моделей
 models_dir = './ml_models'
@@ -50,20 +44,20 @@ for file in model_files:
     available_models[file] = model_classes
 
 # Настройки Minio
-MINIO_BUCKET_NAME = 'mlops_mybucket'
-
-# Инициализация Minio клиента
-minio_client = boto3.client(
-    's3',
-    endpoint_url=MINIO_ENDPOINT,
-    aws_access_key_id=MINIO_ACCESS_KEY,
-    aws_secret_access_key=MINIO_SECRET_KEY
+MINIO_BUCKET_NAME = 'mlopsbucket'
+# Настройка Minio
+minio_client = Minio(
+    os.getenv("MINIO_ENDPOINT", "minio:9000"),
+    access_key=os.getenv("MINIO_ACCESS_KEY", "minioadmin"),
+    secret_key=os.getenv("MINIO_SECRET_KEY", "minioadmin"),
+    secure=False
 )
 
 # Создание бакета в Minio
 def create_minio_bucket(bucket_name):
     try:
-        minio_client.create_bucket(Bucket=bucket_name)
+        if not minio_client.bucket_exists(bucket_name):
+            minio_client.make_bucket(bucket_name)
         logger.info(f'Bucket {bucket_name} created successfully.')
     except ClientError as e:
         logger.error(f'Error creating bucket {bucket_name}: {e}')
