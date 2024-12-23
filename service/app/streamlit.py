@@ -4,7 +4,8 @@ import requests
 from app.pydantic_models import TrainRequest, RetrainRequest, EvaluateRequest, PredictRequest
 
 # URL вашего REST сервиса
-API_URL = "http://localhost:8000"
+API_URL = os.getenv("FASTAPI_ENDPOINT", "http://fastapi:8000")
+
 
 # Функция для получения статуса сервиса
 def get_status():

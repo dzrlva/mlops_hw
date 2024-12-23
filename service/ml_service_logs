@@ -1,0 +1,8 @@
+2024-12-23 09:24:16,957 - DEBUG - Starting new HTTP connection (1): minio:9000
+2024-12-23 09:24:16,962 - DEBUG - http://minio:9000 "GET /mlopsbucket?location= HTTP/1.1" 200 0
+2024-12-23 09:24:16,963 - DEBUG - http://minio:9000 "HEAD /mlopsbucket HTTP/1.1" 200 0
+2024-12-23 09:24:16,963 - INFO - Bucket mlopsbucket created successfully.
+2024-12-23 09:24:16,966 - INFO - Started server process [34]
+2024-12-23 09:24:16,966 - INFO - Waiting for application startup.
+2024-12-23 09:24:16,966 - INFO - Application startup complete.
+2024-12-23 09:24:16,966 - INFO - Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)

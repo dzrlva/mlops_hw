@@ -43,8 +43,6 @@ for file in model_files:
     model_classes = get_model_classes(module)
     available_models[file] = model_classes
 
-# Настройки Minio
-MINIO_BUCKET_NAME = 'mlopsbucket'
 # Настройка Minio
 minio_client = Minio(
     os.getenv("MINIO_ENDPOINT", "minio:9000"),
@@ -54,37 +52,9 @@ minio_client = Minio(
 )
 
 # Создание бакета в Minio
-def create_minio_bucket(bucket_name):
-    try:
-        if not minio_client.bucket_exists(bucket_name):
-            minio_client.make_bucket(bucket_name)
-        logger.info(f'Bucket {bucket_name} created successfully.')
-    except ClientError as e:
-        logger.error(f'Error creating bucket {bucket_name}: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Инициализация DVC и настройка удаленного хранилища
-def setup_dvc():
-    try:
-        # Инициализация DVC
-        dvc.api.init()
-        # Настройка удаленного хранилища DVC
-        dvc.api.remote_add(name='myremote', url=f's3://{MINIO_BUCKET_NAME}')
-        dvc.api.remote_modify(name='myremote', option='endpointurl', value=os.getenv("MINIO_ENDPOINT", "play.min.io"),)
-        dvc.api.remote_modify(name='myremote', option='access_key_id', value=os.getenv("MINIO_ACCESS_KEY", "minioadmin"))
-        dvc.api.remote_modify(name='myremote', option='secret_access_key', value=os.getenv("MINIO_SECRET_KEY", "minioadmin"))
-        dvc.api.remote_default(name='myremote')
-
-        logger.info('DVC initialized and remote storage configured successfully.')
-    except Exception as e:
-        logger.error(f'Error setting up DVC: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
-
-# Создание бакета и настройка DVC при запуске приложения
-@app.on_event("startup")
-async def startup_event():
-    create_minio_bucket(MINIO_BUCKET_NAME)
-    setup_dvc()
+if not minio_client.bucket_exists(os.getenv("MINIO_BUCKET_NAME", "mlopsbucket")):
+    minio_client.make_bucket(os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"))
+logger.info(f"Bucket {os.getenv('MINIO_BUCKET_NAME', 'mlopsbucket')} created successfully.")
 
 @app.get("/models", response_model=List[str])
 def get_available_models():
