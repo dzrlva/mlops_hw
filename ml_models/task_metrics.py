@@ -3,8 +3,7 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics import (
     median_absolute_error, max_error, mean_absolute_percentage_error, mean_absolute_error,
-    mean_squared_error, mean_squared_log_error, r2_score, explained_variance_score,
-    mean_gamma_deviance, mean_poisson_deviance, accuracy_score, precision_score,
+    root_mean_squared_error, r2_score, explained_variance_score, accuracy_score, precision_score,
     recall_score, fbeta_score, roc_auc_score, average_precision_score
 )
 
@@ -34,9 +33,8 @@ def reg_model_metric_performance(y_true, y_pred, **kwargs):
         'std_pred': y_pred.std(), 'mean_pred': y_pred.mean(), 'median_pred': np.median(y_pred),
         'medianae': median_absolute_error(y_true, y_pred), 'maxae': max_error(y_true, y_pred),
         'mape': mean_absolute_percentage_error(y_true, y_pred), 'mae': mean_absolute_error(y_true, y_pred),
-        'rmse': mean_squared_error(y_true, y_pred, squared=False), 'rmsle': mean_squared_log_error(y_true, y_pred, squared=False),
+        'rmse': root_mean_squared_error(y_true, y_pred),
         'R2': r2_score(y_true, y_pred), 'explained_variance': explained_variance_score(y_true, y_pred),
-        'gamma': mean_gamma_deviance(y_true, y_pred), 'poisson': mean_poisson_deviance(y_true, y_pred),
         'medianae / median': median_absolute_error(y_true, y_pred) / np.median(y_true), 
         'mae / mean': mean_absolute_error(y_true, y_pred) / np.mean(y_true)
     }
@@ -72,8 +70,6 @@ def binary_model_metric_performance(y_true, y_pred, **kwargs):
         'roc-auc': roc_auc_score(y_true, pred),
         'pr-auc': average_precision_score(y_true, pred),
     }
-    binary_metrics.update(target_classes)
-    binary_metrics.update(pred_classes)
     return binary_metrics
 
 def multiclass_model_metric_performance(y_true, y_pred_proba, **kwargs):
@@ -104,6 +100,4 @@ def multiclass_model_metric_performance(y_true, y_pred_proba, **kwargs):
         'f1_micro': fbeta_score(y_true, pred, average='micro', beta=1),
         'f1_macro': fbeta_score(y_true, pred, average='macro', beta=1)
     }
-    multiclass_metrics.update(target_classes)
-    multiclass_metrics.update(pred_classes)
     return multiclass_metrics

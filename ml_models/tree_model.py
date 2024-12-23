@@ -19,19 +19,18 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 
-from base_model import BaseModel
+from ml_models.base_model import BaseModel
 
 # Настройка логгирования
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# Функции для оценки моделей уже определены в вашем коде
+logging.basicConfig(filename='./ml_service_logs', filemode='a', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger('./ml_service_logs')
 
 class TreeModel(BaseModel):
     """
     Класс для моделей деревьев машинного обучения.
     """
-    def __init__(self, model_id=None, model_params=None, task_type='regression'):
-        super().__init__(model_id, model_params, task_type)
+    def __init__(self, model_id=None, model_description=None, model_params=None, task_type='regression'):
+        super().__init__(model_id, model_description, model_params, task_type)
         self.pipeline_path = os.path.join('pipelines', f'{self.model_id}_pipeline.joblib')
         # Создаем директорию для пайплайнов, если она не существует
         if not os.path.exists('pipelines'):
@@ -73,21 +72,23 @@ class TreeModel(BaseModel):
 
         # Сохранение пайплайна
         joblib.dump(pipeline, self.pipeline_path)
-        logging.info(f'Pipeline {self.model_id} saved to {self.pipeline_path}')
+        logger.info(f'Pipeline {self.model_id} saved to {self.pipeline_path}')
         return pipeline
 
-    def prepare_features(self, X):
+    def prepare_features(self, X, y):
         """
         Подготовка признаков с использованием пайплайна.
         :param X: Матрица признаков.
+        :param y: Вектор целевых значений.
         :return: Подготовленные признаки.
         """
         if not os.path.exists(self.pipeline_path):
-            logging.error(f'Pipeline {self.model_id} not found at {self.pipeline_path}')
-            logging.info(f'Pipeline {self.model_id} start fitting')
+            logger.error(f'Pipeline {self.model_id} not found at {self.pipeline_path}')
+            logger.info(f'Pipeline {self.model_id} start fitting')
             self.features_pipeline(X, y)
+
         pipeline = joblib.load(self.pipeline_path)
-        logging.info(f'Pipeline {self.model_id} loaded from {self.pipeline_path}')
+        logger.info(f'Pipeline {self.model_id} loaded from {self.pipeline_path}')
         X_prepared = pipeline.transform(X)
         return X_prepared
 
@@ -102,10 +103,11 @@ class TreeModel(BaseModel):
         elif 'classification' in self.task_type:
             self.model = DecisionTreeClassifier(**self.model_params)
         else:
-            logging.error(f'Unknown task type {self.task_type}')
+            logger.error(f'Unknown task type {self.task_type}')
             raise Exception('Unknown task type')
+            
         self.model.fit(X, y)
-        logging.info(f'Model {self.model_id} fitted')
+        logger.info(f'Model {self.model_id} fitted')
 
     def optimize_hyperparameters(self, X, y, optimize_hyperparameters_params):
         """
@@ -119,7 +121,7 @@ class TreeModel(BaseModel):
         elif 'classification' in self.task_type:
             model = DecisionTreeClassifier(**self.model_params)
         else:
-            logging.error(f'Unknown task type {self.task_type}')
+            logger.error(f'Unknown task type {self.task_type}')
             raise Exception('Unknown task type')
 
         if self.task_type == 'regression':
@@ -129,7 +131,7 @@ class TreeModel(BaseModel):
         elif self.task_type == 'multiclass_classification':
             scoring_metric = 'accuracy'
         else:
-            logging.error(f'Unknown task type {self.task_type}')
+            logger.error(f'Unknown task type {self.task_type}')
             raise Exception('Unknown task type')
 
         grid_search = GridSearchCV(model, 
@@ -138,7 +140,7 @@ class TreeModel(BaseModel):
             scoring=scoring_metric)
         grid_search.fit(X, y)
         best_params = grid_search.best_estimator_.get_params()
-        logging.info(f'Model {self.model_id} optimized with params {best_params}')
+        logger.info(f'Model {self.model_id} optimized with params {best_params}')
         return best_params
 
     def delete(self):
@@ -147,11 +149,15 @@ class TreeModel(BaseModel):
         """
         if os.path.exists(self.model_path):
             os.remove(self.model_path)
-            logging.info(f'Model {self.model_id} deleted from {self.model_path}')
+            logger.info(f'Model {self.model_id} deleted from {self.model_path}')
         self.status = 'deleted'
         self._update_log()
         self.model = None
 
+        if os.path.exists(self.le_path):
+            os.remove(self.le_path)
+            logger.info(f'LabelEncoder {self.model_id} deleted from {self.le_path}')
+
         if os.path.exists(self.pipeline_path):
             os.remove(self.pipeline_path)
-            logging.info(f'Pipeline {self.model_id} deleted from {self.pipeline_path}')
+            logger.info(f'Pipeline {self.model_id} deleted from {self.pipeline_path}')

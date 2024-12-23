@@ -13,11 +13,13 @@ from sklearn.metrics import (
     recall_score, fbeta_score, roc_auc_score, average_precision_score
 )
 from sklearn.model_selection import cross_val_score, GridSearchCV
+from sklearn.preprocessing import LabelEncoder
 
-from task_metrics import reg_model_metric_performance, binary_model_metric_performance, multiclass_model_metric_performance
+from ml_models.task_metrics import reg_model_metric_performance, binary_model_metric_performance, multiclass_model_metric_performance
 
 # Настройка логгирования
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(filename='./ml_service_logs', filemode='a', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger('./ml_service_logs')
 
 class BaseModel(ABC):
     """
@@ -35,34 +37,36 @@ class BaseModel(ABC):
         self.model_params = model_params if model_params else {}
         self.model = None
         self.status = 'initialized'
-        self.model_path = os.path.join('../models', f'{self.model_id}.joblib')
+        self.model_path = os.path.join('models', f'{self.model_id}.joblib')
         self.log_path = 'models_log.csv'
         self.task_type = task_type
         self.model_description = model_description
-        self.le_path = os.path.join('../models', f'{self.model_id}_le.joblib') # LabelEncoder при необходимости
+        self.le_path = os.path.join('label_encoders', f'{self.model_id}_le.joblib') # LabelEncoder при необходимости
         # Создаем директорию для моделей, если она не существует
-        if not os.path.exists('../models'):
-            os.makedirs('../models')
+        if not os.path.exists('models'):
+            os.makedirs('models')
+        if not os.path.exists('label_encoders'):
+            os.makedirs('label_encoders')
         # Создаем журнал моделей, если он не существует
         if not os.path.exists(self.log_path):
-            log_df = pd.DataFrame(columns=['model_id', 'model_description', 'model_params', 
+            log_df = pd.DataFrame(columns=['model_id', 'model_type', 'model_description', 'model_params', 
                 'status', 'status_time', 'model_path', 'task_type', 'cv_metrics'])
             log_df.to_csv(self.log_path, index=False)
         if model_id is None:
             # Записываем информацию о модели в журнал
             self._update_log()
-            logging.info(f'Model {self.model_id} initialized with params {self.model_params} for task {self.task_type}')
+            logger.info(f'Model {self.model_id} initialized with params {self.model_params} for task {self.task_type}')
         else:
             # Загружаем логи по данной модели
             model_id_logs = pd.read_csv(self.log_path, parse_dates=['status_time'])
             model_id_logs = model_id_logs.loc[model_id_logs.model_id == self.model_id].sort_values('status_time')
             # Восстановим из логов не заполненные параметры, такие как task_type, которые понадобятся            
             if self.task_type is None:
-                self.task_type = model_id_logs.iloc[-1, 6]
+                self.task_type = model_id_logs.iloc[-1, 7]
             if self.model_params is None:
-                self.model_params = eval(model_id_logs.iloc[-1, 2])
+                self.model_params = eval(model_id_logs.iloc[-1, 3])
             if self.model_description is None:
-                self.model_description = model_id_logs.iloc[-1, 1]
+                self.model_description = model_id_logs.iloc[-1, 2]
 
     def _update_log(self, cv_metrics=None):
         """
@@ -72,6 +76,7 @@ class BaseModel(ABC):
         # создаем новую запись
         new_log = pd.DataFrame({
             'model_id': [self.model_id],
+            'model_type': [self.__class__.__name__],
             'model_description': [self.model_description],
             'model_params': [str(self.model_params)],
             'status': [self.status],
@@ -84,10 +89,11 @@ class BaseModel(ABC):
             new_log.to_csv(f, index=False, header=False)
             
     @abstractmethod
-    def prepare_features(self, X):
+    def prepare_features(self, X, y):
         """
         Подготовка признаков.
         :param X: Матрица признаков.
+        :param y: Вектор целевых значений.
         :return: Подготовленные признаки.
         """
         pass
@@ -127,25 +133,25 @@ class BaseModel(ABC):
             if not all(isinstance(x, (int, float)) for x in y):
                 # Есть строковые данные, нужен LabelEncoder
                 target = np.array(y, dtype=str)
-                
+
                 if not os.path.exists(self.le_path):
                     label_encoder = LabelEncoder()
                     label_encoder.fit(target)
                     # Сохранение пайплайна
                     joblib.dump(label_encoder, self.le_path)
-                    logging.info(f'LabelEncoder {self.model_id} saved to {self.le_path}')
+                    logger.info(f'LabelEncoder {self.model_id} saved to {self.le_path}')
                 else:
                     label_encoder = joblib.load(self.le_path)
-                    logging.info(f'LabelEncoder {self.model_id} loaded from {self.le_path}')
+                    logger.info(f'LabelEncoder {self.model_id} loaded from {self.le_path}')
 
                 target_encoded = label_encoder.transform(target)
                 return target_encoded
             else:
                 # Если все значения числовые, преобразуем их к целым числам
-                target = np.array(target, dtype=int)
+                target = np.array(y, dtype=int)
                 return target
         else:
-            logging.error(f'Unknown task type {self.task_type}')
+            logger.error(f'Unknown task type {self.task_type}')
             raise Exception('Unknown task type')
 
     def train(self, X, y, cv=5, optimize_hyperparameters_flag=False, optimize_hyperparameters_params=None):
@@ -157,15 +163,18 @@ class BaseModel(ABC):
         :param optimize_hyperparameters_flag: Флаг для автоматического подбора гиперпараметров.
         :param optimize_hyperparameters_params: Параметры для подбора гиперпараметров под GridSearchCV.
         """
-        X_prepared = self.prepare_features(X)
+        X_prepared = self.prepare_features(X, y)
         y_prepared = self.prepare_taget(y)
+
         # Подбор гиперпараметров, если флаг установлен
         if optimize_hyperparameters_flag:
             self.model_params = self.optimize_hyperparameters(X_prepared, y_prepared, optimize_hyperparameters_params)
-            logging.info(f'Model {self.model_id} optimized with params {self.model_params}')
+            logger.info(f'Model {self.model_id} optimized with params {self.model_params}')
+        
         self.status = 'fitting' if self.status != 'retrained' else 'refitting'
         self._update_log()
         self.fit(X_prepared, y_prepared)
+        
         # Оценка метрик на кросс-валидации
         if self.task_type == 'regression':
             cv_scores = cross_val_score(self.model, X_prepared, y_prepared, cv=cv, scoring='neg_mean_squared_error')
@@ -177,12 +186,13 @@ class BaseModel(ABC):
             cv_scores = cross_val_score(self.model, X_prepared, y_prepared, cv=cv, scoring='accuracy')
             cv_metrics = {'cv_accuracy': np.mean(cv_scores)}
         else:
-            logging.error(f'Unknown task type {self.task_type}')
+            logger.error(f'Unknown task type {self.task_type}')
             raise Exception('Unknown task type')
-        self.status = 'trained' if self.status != 'retrained' else 'retrained'
+        
+        self.status = 'trained' if self.status != 'refitting' else 'retrained'
         self.save()
         self._update_log(cv_metrics)
-        logging.info(f'Model {self.model_id} trained with params {self.model_params} and cv_metrics {cv_metrics}')
+        logger.info(f'Model {self.model_id} trained with params {self.model_params} and cv_metrics {cv_metrics}')
 
     def retrain(self, X, y, cv=5, optimize_hyperparameters_flag=False, optimize_hyperparameters_params=None):
         """
@@ -194,8 +204,8 @@ class BaseModel(ABC):
         :param optimize_hyperparameters_params: Параметры для подбора гиперпараметров под GridSearchCV.
         """
         self.status = 'retrained'
-        self.train(X, y, optimize_hyperparameters_flag, optimize_hyperparameters_params)
-        logging.info(f'Model {self.model_id} retrained')
+        self.train(X, y, cv, optimize_hyperparameters_flag, optimize_hyperparameters_params)
+        logger.info(f'Model {self.model_id} retrained')
 
     def predict(self, X):
         """
@@ -205,9 +215,10 @@ class BaseModel(ABC):
         """
         if self.model is None:
             self.load()
-        X_prepared = self.prepare_features(X)
+
+        X_prepared = self.prepare_features(X, None)
         predictions = self.model.predict(X_prepared)
-        logging.info(f'Model {self.model_id} made predictions')
+        logger.info(f'Model {self.model_id} made predictions')
         return predictions
 
     def predict_proba(self, X):
@@ -218,12 +229,14 @@ class BaseModel(ABC):
         """
         if self.model is None:
             self.load()
+
         if not hasattr(self.model, 'predict_proba'):
-            logging.error(f'Model {self.model_id} does not have predict_proba method')
+            logger.error(f'Model {self.model_id} does not have predict_proba method')
             raise Exception('Model does not have predict_proba method')
-        X_prepared = self.prepare_features(X)
+
+        X_prepared = self.prepare_features(X, None)
         predictions_proba = self.model.predict_proba(X_prepared)
-        logging.info(f'Model {self.model_id} made probability predictions')
+        logger.info(f'Model {self.model_id} made probability predictions')
         return predictions_proba
 
     def save(self):
@@ -231,25 +244,26 @@ class BaseModel(ABC):
         Сохранение модели.
         """
         if self.model is None:
-            logging.error(f'Model {self.model_id} is not trained')
+            logger.error(f'Model {self.model_id} is not trained')
             raise Exception('Model is not trained')
+
         joblib.dump(self.model, self.model_path)
-        self._update_log()
-        logging.info(f'Model {self.model_id} saved to {self.model_path}')
+        logger.info(f'Model {self.model_id} saved to {self.model_path}')
 
     def load(self):
         """
         Загрузка модели.
         """
         if self.model is not None:
-            logging.info(f'Model {self.model_id} is already loaded')
+            logger.info(f'Model {self.model_id} is already loaded')
             return
+
         if not os.path.exists(self.model_path):
-            logging.error(f'Model {self.model_id} not found at {self.model_path}')
+            logger.error(f'Model {self.model_id} not found at {self.model_path}')
             raise Exception('Model not found')
+
         self.model = joblib.load(self.model_path)
-        self.status = 'loaded'
-        logging.info(f'Model {self.model_id} loaded from {self.model_path}')
+        logger.info(f'Model {self.model_id} loaded from {self.model_path}')
 
     def delete(self):
         """
@@ -257,7 +271,12 @@ class BaseModel(ABC):
         """
         if os.path.exists(self.model_path):
             os.remove(self.model_path)
-            logging.info(f'Model {self.model_id} deleted from {self.model_path}')
+            logger.info(f'Model {self.model_id} deleted from {self.model_path}')
+
+        if os.path.exists(self.le_path):
+            os.remove(self.le_path)
+            logger.info(f'LabelEncoder {self.model_id} deleted from {self.le_path}')
+
         self.status = 'deleted'
         self._update_log()
         self.model = None
@@ -272,19 +291,23 @@ class BaseModel(ABC):
         """
         if self.model is None:
             self.load()
-        X_prepared = self.prepare_features(X)
+
+        X_prepared = self.prepare_features(X, y)
+        y_prepared = self.prepare_taget(y)
+
         if self.task_type == 'regression':
             y_pred = self.model.predict(X_prepared)
-            metrics = reg_model_metric_performance(y, y_pred, **kwargs)
+            metrics = reg_model_metric_performance(y_prepared, y_pred, **kwargs)
         elif self.task_type == 'binary_classification':
             y_pred_proba = self.model.predict_proba(X_prepared)
             y_pred = y_pred_proba[:, 1]  # Предсказания для положительного класса
-            metrics = binary_model_metric_performance(y, y_pred, **kwargs)
+            metrics = binary_model_metric_performance(y_prepared, y_pred, **kwargs)
         elif self.task_type == 'multiclass_classification':
             y_pred_proba = self.model.predict_proba(X_prepared)
-            metrics = multiclass_model_metric_performance(y, y_pred_proba, **kwargs)
+            metrics = multiclass_model_metric_performance(y_prepared, y_pred_proba, **kwargs)
         else:
-            logging.error(f'Unknown task type {self.task_type}')
+            logger.error(f'Unknown task type {self.task_type}')
             raise Exception('Unknown task type')
-        logging.info(f'Model {self.model_id} evaluated with metrics {metrics}')
+            
+        logger.info(f'Model {self.model_id} evaluated with metrics {metrics}')
         return metrics

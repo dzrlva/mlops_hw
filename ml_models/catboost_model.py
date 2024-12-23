@@ -15,24 +15,24 @@ from sklearn.metrics import (
 from sklearn.model_selection import cross_val_score, GridSearchCV
 from catboost import CatBoostRegressor, CatBoostClassifier, Pool
 
-from base_model import BaseModel
+from ml_models.base_model import BaseModel
 
 # Настройка логгирования
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# Функции для оценки моделей уже определены в вашем коде
+logging.basicConfig(filename='./ml_service_logs', filemode='a', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger('./ml_service_logs')
 
 class CatBoostModel(BaseModel):
     """
     Класс для моделей CatBoost.
     """
-    def __init__(self, model_id=None, model_params=None, task_type='regression'):
-        super().__init__(model_id, model_params, task_type)
+    def __init__(self, model_id=None, model_description=None, model_params=None, task_type='regression'):
+        super().__init__(model_id, model_description, model_params, task_type)
 
-    def prepare_features(self, X):
+    def prepare_features(self, X, y):
         """
         Подготовка признаков.
         :param X: Матрица признаков.
+        :param y: Вектор целевых значений.
         :return: Подготовленные признаки.
         """
         return X
@@ -65,11 +65,11 @@ class CatBoostModel(BaseModel):
         elif 'classification' in self.task_type:
             self.model = CatBoostClassifier(**self.model_params)
         else:
-            logging.error(f'Unknown task type {self.task_type}')
+            logger.error(f'Unknown task type {self.task_type}')
             raise Exception('Unknown task type')
 
         self.model.fit(pool)
-        logging.info(f'Model {self.model_id} fitted')
+        logger.info(f'Model {self.model_id} fitted')
 
     def optimize_hyperparameters(self, X, y, optimize_hyperparameters_params):
         """
@@ -86,10 +86,10 @@ class CatBoostModel(BaseModel):
         elif 'classification' in self.task_type:
             model = CatBoostClassifier(self.model_params)
         else:
-            logging.error(f'Unknown task type {self.task_type}')
+            logger.error(f'Unknown task type {self.task_type}')
             raise Exception('Unknown task type')
 
         grid_search = model.grid_search(optimize_hyperparameters_params, pool)
         best_params = model.get_all_params()
-        logging.info(f'Model {self.model_id} optimized with params {best_params}')
+        logger.info(f'Model {self.model_id} optimized with params {best_params}')
         return best_params
