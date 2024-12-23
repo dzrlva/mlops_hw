@@ -3,10 +3,17 @@ import importlib.util
 from pathlib import Path
 import pandas as pd
 import numpy as np
+import subprocess
 import boto3
 from botocore.exceptions import NoCredentialsError, ClientError
+from fastapi import HTTPException
 from dvc.exceptions import DvcException
 from ml_models.base_model import BaseModel
+import logging
+
+# Настройка логгирования
+logging.basicConfig(filename='./ml_service_logs', filemode='a', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger('./ml_service_logs')
 
 def find_model_files(models_dir):
     """
@@ -84,10 +91,10 @@ def upload_dataset_to_minio_and_dvc_track(minio_client, bucket_name, object_name
         minio_client.fput_object(bucket_name, object_name, file_path)
         logger.info(f'Dataset uploaded to Minio: {object_name} from {file_path}')
         
-        # Отслеживание файла с помощью DVC
-        subprocess.run(['dvc', 'add', file_path], check=True)
-        subprocess.run(['dvc', 'commit', '-m', f'Add dataset {object_name}'], check=True)
-        logger.info(f'Dataset {object_name} tracked by DVC')
+        # Отслеживание файла с помощью DVC (не работает)
+        # subprocess.run(['dvc', 'add', file_path], check=True)
+        # subprocess.run(['dvc', 'commit', '-m', f'Add dataset {object_name}'], check=True)
+        # logger.info(f'Dataset {object_name} tracked by DVC')
         
         # Удаление файла из буферной папки
         os.remove(file_path)

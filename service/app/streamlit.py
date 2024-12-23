@@ -16,6 +16,11 @@ def get_available_models():
     response = requests.get(f"{API_URL}/models")
     return response.json()
 
+# Функция для получения списка доступных датасетов
+def get_available_datasets():
+    response = requests.get(f"{API_URL}/datasets_info")
+    return response.json()
+
 # Функция для получения списка моделей из журнала
 def get_journal_models():
     response = requests.get(f"{API_URL}/models_info")
@@ -49,31 +54,41 @@ def delete_model(model_id: str):
 # Основное меню дэшборда
 st.title("Машинное обучение с использованием REST сервиса")
 
-menu = st.sidebar.selectbox("Выберите действие", ["Загрузка датасета", "Скачивание датасета",
+menu = st.sidebar.selectbox("Выберите действие", ["Загрузка датасета", "Скачивание датасета", "Доступные датасеты",
     "Список моделей", "Обучение новой модели", "Переобучение модели", "Оценка модели", "Предсказание", "Удаление модели", "Информация о моделях", "Статус"])
 
 if menu == "Загрузка датасета":
     st.header("Загрузка датасета")
-    uploaded_file = st.file_uploader("Выберите файл")
+    uploaded_file = st.file_uploader("Выберите файл (в файле обязательно должна быть переменная target)")
     if uploaded_file is not None:
-        file_path = os.path.join('./data', uploaded_file.name)
-        with open(file_path, "wb") as buffer:
-            buffer.write(uploaded_file.read())
-
         # Загрузка файла через REST сервис
-        files = {'file': open(file_path, 'rb')}
-        response = requests.post(f"{API_URL}/upload-dataset/", files=files)
+        files = {'file': uploaded_file}
+        response = requests.post(f"{API_URL}/upload_dataset/", files=files)
         st.write(response.json())
+
+elif menu == "Доступные датасеты":
+    st.header("Доступные датасеты")
+    datasets = get_available_datasets()
+    st.write(datasets)
 
 elif menu == "Скачивание датасета":
     st.header("Скачивание датасета")
     object_name = st.text_input("Название датасета в Minio")
-    file_path = os.path.join('./data', object_name)
-
+    # Получение датасета
     if st.button("Скачать"):
-        # Скачивание файла через REST сервис
-        response = requests.get(f"{API_URL}/download-dataset/{object_name}")
-        st.write(response.json())
+        try:
+            response = requests.get(f"{API_URL}/download_dataset/{object_name}")
+            if response.status_code == 200:
+                st.download_button(
+                    label="Скачать датасет",
+                    data=response.content,
+                    file_name=object_name,
+                    mime="text/csv"
+                )
+            else:
+                st.error(f"Ошибка при скачивании датасета: {response.json()}")
+        except Exception as e:
+            st.error(f'Error downloading dataset: {e}')
 
 elif menu == "Список моделей":
     st.header("Список доступных моделей")

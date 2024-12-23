@@ -25,8 +25,8 @@ class CatBoostModel(BaseModel):
     """
     Класс для моделей CatBoost.
     """
-    def __init__(self, model_id=None, model_description=None, model_params=None, task_type='regression'):
-        super().__init__(model_id, model_description, model_params, task_type)
+    def __init__(self, model_id=None, model_description=None, model_params=None, task_type='regression', mlflow_experiment_name=None):
+        super().__init__(model_id, model_description, model_params, task_type, mlflow_experiment_name)
 
     def prepare_features(self, X, y):
         """
