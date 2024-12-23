@@ -393,18 +393,3 @@ class BaseModel(ABC):
         except Exception as e:
             logger.error(f'Error loading model from MLflow: {e}')
             raise
-
-    def download_dataset_from_minio(self, minio_client, bucket_name, object_name, file_path):
-        """
-        Скачивание датасета из Minio.
-        :param minio_client: Клиент Minio.
-        :param bucket_name: Имя бакета.
-        :param object_name: Имя объекта в бакете.
-        :param file_path: Путь к файлу для сохранения.
-        """
-        try:
-            minio_client.fget_object(bucket_name, object_name, file_path)
-            logger.info(f'Dataset downloaded from Minio: {object_name} to {file_path}')
-        except Exception as e:
-            logger.error(f'Error downloading dataset from Minio: {e}')
-            raise

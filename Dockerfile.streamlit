@@ -24,5 +24,6 @@ ENV PYTHONPATH=/service
 # Экспонируем порт
 EXPOSE 8501
 
+
 # Запуск приложения
-CMD ["streamlit", "run", "app/streamlit.py", "--server.port", "8501", "--server.enableCORS", "false"]
+CMD ["poetry", "run", "streamlit", "run", "app/streamlit.py", "--server.port", "8501", "--server.enableCORS", "false"]
