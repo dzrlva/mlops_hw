@@ -7,7 +7,6 @@ import pandas as pd
 from datetime import datetime
 
 from minio import Minio
-import dvc.api
 import mlflow
 from mlflow.models import Model
 from mlflow.sklearn import save_model, load_model
@@ -99,7 +98,7 @@ async def upload_dataset(file: UploadFile = File(...)):
 
     upload_dataset_to_minio_and_dvc_track(minio_client, os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), file.filename, file_path)
 
-    return eturn {"filename": file.filename, "message": "Dataset uploaded and tracked successfully"}
+    return {"filename": file.filename, "message": "Dataset uploaded and tracked successfully"}
 
 @app.get("/download-dataset/{filename}")
 async def download_dataset(filename: str):

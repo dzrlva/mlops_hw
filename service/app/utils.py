@@ -5,7 +5,6 @@ import pandas as pd
 import numpy as np
 import boto3
 from botocore.exceptions import NoCredentialsError, ClientError
-from dvc.api import add, commit
 from dvc.exceptions import DvcException
 from ml_models.base_model import BaseModel
 
@@ -86,8 +85,8 @@ def upload_dataset_to_minio_and_dvc_track(minio_client, bucket_name, object_name
         logger.info(f'Dataset uploaded to Minio: {object_name} from {file_path}')
         
         # Отслеживание файла с помощью DVC
-        add(file_path)
-        commit(f'Add dataset {object_name}')
+        subprocess.run(['dvc', 'add', file_path], check=True)
+        subprocess.run(['dvc', 'commit', '-m', f'Add dataset {object_name}'], check=True)
         logger.info(f'Dataset {object_name} tracked by DVC')
         
         # Удаление файла из буферной папки
