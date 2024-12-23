@@ -17,7 +17,8 @@ from botocore.exceptions import NoCredentialsError, ClientError
 from ml_models.catboost_model import CatBoostModel
 from ml_models.linear_model import LinearModel
 from ml_models.tree_model import TreeModel
-from app.utils import find_model_files, import_module_from_file, get_model_classes, check_model_status
+from app.utils import (find_model_files, import_module_from_file, get_model_classes, check_model_status, 
+    download_dataset_from_minio, upload_dataset_to_minio_and_dvc_track)
 from app.pydantic_models import PredictRequest, RetrainRequest, EvaluateRequest, TrainRequest
 
 import logging
@@ -28,6 +29,11 @@ app = FastAPI(title="ML Model Service")
 logging.basicConfig(filename='./ml_service_logs', filemode='a', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger('./ml_service_logs')
 
+if not os.path.exists('./upload_data'):
+    os.makedirs('./upload_data')
+
+if not os.path.exists('./download_data'):
+    os.makedirs('./download_data')
 
 # Настройка MLflow
 mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5432"))
@@ -83,41 +89,33 @@ def get_models_info():
 
 @app.post("/upload-dataset/")
 async def upload_dataset(file: UploadFile = File(...)):
-    try:
-        # Сохранение файла локально
-        file_path = os.path.join('./data', file.filename)
-        with open(file_path, "wb") as buffer:
-            buffer.write(await file.read())
+    """
+    Загружает датасет в minio и отслеживает его с помощью DVC.
+    """
+    # Сохранение файла локально
+    file_path = os.path.join('./upload_data', file.filename)
+    with open(file_path, "wb") as buffer:
+        buffer.write(await file.read())
 
-        # Загрузка файла в Minio
-        minio_client.fput_object("datasets", file.filename, file_path)
-        logger.info(f'Dataset uploaded to Minio: {file_path} to {file.filename}')
+    upload_dataset_to_minio_and_dvc_track(minio_client, os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), file.filename, file_path)
 
-        # Отслеживание файла с помощью DVC
-        dvc.api.add(file_path)
-        dvc.api.commit('Add dataset')
-        logger.info(f'Dataset tracked with DVC: {file_path}')
-
-        return {"filename": file.filename, "message": "Dataset uploaded and tracked successfully"}
-    except Exception as e:
-        logger.error(f'Error uploading and tracking dataset: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+    return eturn {"filename": file.filename, "message": "Dataset uploaded and tracked successfully"}
 
 @app.get("/download-dataset/{filename}")
 async def download_dataset(filename: str):
-    try:
-        # Путь к файлу локально
-        file_path = os.path.join('./data', filename)
+    """
+    Выгружеает датасет из minio
+    """
+    # Путь к файлу локально
+    file_path = os.path.join('./download_data', filename)
 
-        # Скачивание файла из Minio
-        minio_client.fget_object("datasets", filename, file_path)
-        logger.info(f'Dataset downloaded from Minio: {filename} to {file_path}')
+    # Скачивание файла из Minio
+    download_dataset_from_minio(minio_client, os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), filename, file_path)
 
-        return {"filename": filename, "message": "Dataset downloaded and tracked successfully"}
-    except Exception as e:
-        logger.error(f'Error downloading and tracking dataset: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info(f'Dataset downloaded from Minio: {filename} to {file_path}')
 
+    return {"filename": filename, "message": "Dataset downloaded successfully"}
+    
 @app.post("/train", response_model=Dict[str, Any])
 def train_model(request: TrainRequest):
     """
@@ -132,18 +130,32 @@ def train_model(request: TrainRequest):
                     task_type=request.task_type,
                     mlflow_experiment_name = request.mlflow_experiment_name)
 
-                if request.dataset_path is not None:
-                    local_dataset_path = os.path.join('./data', request.dataset_path)
-                    model.download_dataset_from_minio(minio_client, MINIO_BUCKET_NAME, request.dataset_path , local_dataset_path)
+                # Получаем данные для обучения: 
+                # Если пришел путь до файла, то скачаем из minio, если пришли данные в запросе, то сохраним датасет в minio
 
-                    df = pd.read_csv(local_dataset_path)
+                if request.dataset_path is not None:
+                    file_path = os.path.join('./download_data', request.dataset_path)
+                    download_dataset_from_minio(minio_client, os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), filename, file_path)
+
+                    df = pd.read_csv(file_path)
                     X = df.drop(columns='target')
                     y = df['target']
+
+                    # Удаление файла из буферной папки после использования
+                    os.remove(file_path)
+                    logger.info(f'Buffer file {file_path} deleted')
                 else:
                     feature_names = request.feature_names if len(request.feature_names) else None
                     X = pd.DataFrame(data=request.features, columns=feature_names)
                     y = request.target
-                
+                    df = X.copy()
+                    df['target'] = y
+
+                    filename = model.model_id + '.csv'
+                    file_path = os.path.join('./upload_data', filename)
+                    df.to_csv(file_path, index=False)
+                    upload_dataset_to_minio_and_dvc_track(minio_client, os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), filename, file_path)
+
                 model.train(X, y, 
                     cv=request.cv,
                     optimize_hyperparameters_flag=request.optimize_hyperparameters_flag, 
@@ -167,13 +179,20 @@ def predict(request: PredictRequest):
             if cls.__name__ == model_type:
                 model = cls(model_id=request.model_id)
 
+    # Получаем данные для предикта: 
+    # Если пришел путь до файла, то скачаем из minio
+
     if request.dataset_path is not None:
-        local_dataset_path = os.path.join('./data', request.dataset_path)
-        model.download_dataset_from_minio(minio_client, MINIO_BUCKET_NAME, request.dataset_path , local_dataset_path)
+        file_path = os.path.join('./download_data', request.dataset_path)
+        download_dataset_from_minio(minio_client, MINIO_BUCKET_NAME, request.dataset_path , file_path)
 
         df = pd.read_csv(local_dataset_path)
         if 'target' in df.columns:
             X = df.drop(columns='target')
+
+        # Удаление файла из буферной папки после использования
+        os.remove(file_path)
+        logger.info(f'Buffer file {file_path} deleted')
     else:
         feature_names = request.feature_names if len(request.feature_names) else None
         X = pd.DataFrame(data=request.features, columns=feature_names)
@@ -203,18 +222,32 @@ def retrain_model(request: RetrainRequest):
                     task_type=None,
                     mlflow_experiment_name = request.mlflow_experiment_name
                     )
+
+                # Получаем данные для обучения: 
+                # Если пришел путь до файла, то скачаем из minio, если пришли данные в запросе, то сохраним датасет в minio
                 
                 if request.dataset_path is not None:
-                    local_dataset_path = os.path.join('./data', request.dataset_path)
-                    model.download_dataset_from_minio(minio_client, MINIO_BUCKET_NAME, request.dataset_path , local_dataset_path)
+                    file_path = os.path.join('./download_data', request.dataset_path)
+                    download_dataset_from_minio(minio_client, os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), filename, file_path)
 
-                    df = pd.read_csv(local_dataset_path)
+                    df = pd.read_csv(file_path)
                     X = df.drop(columns='target')
                     y = df['target']
+
+                    # Удаление файла из буферной папки после использования
+                    os.remove(file_path)
+                    logger.info(f'Buffer file {file_path} deleted')
                 else:
                     feature_names = request.feature_names if len(request.feature_names) else None
                     X = pd.DataFrame(data=request.features, columns=feature_names)
                     y = request.target
+                    df = X.copy()
+                    df['target'] = y
+
+                    filename = model.model_id + '.csv'
+                    file_path = os.path.join('./upload_data', filename)
+                    df.to_csv(file_path, index=False)
+                    upload_dataset_to_minio_and_dvc_track(minio_client, os.getenv("MINIO_BUCKET_NAME", "mlopsbucket"), filename, file_path)
 
                 model.retrain(X, y, 
                     cv=request.cv, 
@@ -238,14 +271,21 @@ def evaluate_model(request: EvaluateRequest):
         for cls in classes:
             if cls.__name__ == model_type:
                 model = cls(model_id=request.model_id, task_type=None)
+
+                # Получаем данные для предикта: 
+                # Если пришел путь до файла, то скачаем из minio
                 
                 if request.dataset_path is not None:
-                    local_dataset_path = os.path.join('./data', request.dataset_path)
-                    model.download_dataset_from_minio(minio_client, MINIO_BUCKET_NAME, request.dataset_path , local_dataset_path)
+                    file_path = os.path.join('./download_data', request.dataset_path)
+                    download_dataset_from_minio(minio_client, MINIO_BUCKET_NAME, request.dataset_path , file_path)
 
                     df = pd.read_csv(local_dataset_path)
                     X = df.drop(columns='target')
                     y = df['target']
+
+                    # Удаление файла из буферной папки после использования
+                    os.remove(file_path)
+                    logger.info(f'Buffer file {file_path} deleted')
                 else:
                     feature_names = request.feature_names if len(request.feature_names) else None
                     X = pd.DataFrame(data=request.features, columns=feature_names)

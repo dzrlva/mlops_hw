@@ -6,7 +6,6 @@ from app.pydantic_models import TrainRequest, RetrainRequest, EvaluateRequest, P
 # URL вашего REST сервиса
 API_URL = os.getenv("FASTAPI_ENDPOINT", "http://fastapi:8000")
 
-
 # Функция для получения статуса сервиса
 def get_status():
     response = requests.get(f"{API_URL}/status")
@@ -46,20 +45,6 @@ def predict_model(request: PredictRequest):
 def delete_model(model_id: str):
     response = requests.delete(f"{API_URL}/delete/{model_id}")
     return response.json()
-
-# Функция для загрузки датасета в Minio и отслеживания с помощью DVC
-def upload_dataset_to_minio_and_track(file_path, object_name):
-    try:
-        # Загрузка файла в Minio
-        minio_client.fput_object("datasets", object_name, file_path)
-        st.info(f'Dataset uploaded to Minio: {file_path} to {object_name}')
-
-        # Отслеживание файла с помощью DVC
-        dvc.api.add(file_path)
-        dvc.api.commit('Add dataset')
-        st.info(f'Dataset tracked with DVC: {file_path}')
-    except Exception as e:
-        st.error(f'Error uploading and tracking dataset: {e}')
 
 # Основное меню дэшборда
 st.title("Машинное обучение с использованием REST сервиса")
