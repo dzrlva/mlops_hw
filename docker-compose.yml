@@ -1,0 +1,50 @@
+services:
+  fastapi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./service:/service
+    depends_on:
+      - minio
+      - mlflow
+
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./service:/service
+    depends_on:
+      - fastapi
+      - minio
+      - mlflow
+
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.19.0
+    ports:
+      - "5432:5432"
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5432
+    volumes:
+      - mlflow-data:/mlflow
+
+volumes:
+  minio-data:
+  mlflow-data:
